@@ -23,16 +23,14 @@ export class MemStorage implements IStorage {
     this.users = new Map();
     this.workflows = new Map();
     this.currentId = 1;
-    // Configure memory store with higher limits for available RAM
     this.sessionStore = new MemoryStore({
       checkPeriod: 86400000, // 24 hours
       max: Math.floor(1024 * 1024 * 1024 * 10), // Use up to 10GB for session storage
       ttl: 86400000, // 24 hour TTL
       dispose: (key, n) => {
-        // Cleanup when sessions are removed
         n = null;
       },
-      stale: false // Don't return stale items
+      stale: false
     });
   }
 
@@ -60,10 +58,15 @@ export class MemStorage implements IStorage {
   }
 
   async createWorkflow(
-    workflow: InsertWorkflow & { userId: number },
+    workflow: InsertWorkflow & { userId: number; lastSaved: string },
   ): Promise<Workflow> {
     const id = this.currentId++;
-    const newWorkflow = { ...workflow, id };
+    const newWorkflow = { 
+      ...workflow,
+      id,
+      requiresJavaScript: workflow.requiresJavaScript ?? false,
+      useProxy: workflow.useProxy ?? false,
+    };
     this.workflows.set(id, newWorkflow);
     return newWorkflow;
   }

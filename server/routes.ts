@@ -8,15 +8,20 @@ import * as cheerio from "cheerio";
 export function registerRoutes(app: Express): Server {
   setupAuth(app);
 
-  app.get("/api/workflows", async (req, res) => {
-    if (!req.user) return res.sendStatus(401);
-    const workflows = await storage.getWorkflowsByUserId(req.user.id);
+  // Make sure all API routes check for authentication
+  const requireAuth = (req: Express.Request, res: Express.Response, next: Express.NextFunction) => {
+    if (!req.isAuthenticated()) {
+      return res.sendStatus(401);
+    }
+    next();
+  };
+
+  app.get("/api/workflows", requireAuth, async (req, res) => {
+    const workflows = await storage.getWorkflowsByUserId(req.user!.id);
     res.json(workflows);
   });
 
-  app.post("/api/workflows", async (req, res) => {
-    if (!req.user) return res.sendStatus(401);
-
+  app.post("/api/workflows", requireAuth, async (req, res) => {
     const result = insertWorkflowSchema.safeParse(req.body);
     if (!result.success) {
       return res.status(400).json(result.error);
@@ -24,26 +29,22 @@ export function registerRoutes(app: Express): Server {
 
     const workflow = await storage.createWorkflow({
       ...result.data,
-      userId: req.user.id,
+      userId: req.user!.id,
       lastSaved: new Date().toISOString(),
     });
 
     res.status(201).json(workflow);
   });
 
-  // Configure scraping with high resource limits
-  app.post("/api/scrape", async (req, res) => {
-    if (!req.user) return res.sendStatus(401);
-
+  app.post("/api/scrape", requireAuth, async (req, res) => {
     const { url, selectors } = req.body;
     if (!url || !selectors) {
       return res.status(400).send("Missing url or selectors");
     }
 
     try {
-      // Configure high timeout for resource-intensive scraping
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
       const response = await fetch(url, {
         signal: controller.signal,
@@ -61,9 +62,8 @@ export function registerRoutes(app: Express): Server {
         if (selector.type === "css") {
           return $(selector.value).text().trim();
         }
-        // XPath support would be implemented here
         return null;
-      }).filter(Boolean); // Remove null results
+      }).filter(Boolean);
 
       res.json({ results });
     } catch (error) {
