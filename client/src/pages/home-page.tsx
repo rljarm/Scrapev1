@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { Card } from "@/components/ui/card";
-import { LogOut } from "lucide-react";
+import { LogOut, Save } from "lucide-react";
 import IframeViewer from "@/components/scraper/iframe-viewer";
 import SelectorTools from "@/components/scraper/selector-tools";
 import WorkflowEditor from "@/components/scraper/workflow-editor";
@@ -61,7 +61,7 @@ export default function HomePage() {
     },
   });
 
-  // Auto-save whenever the URL or selected elements change
+  // Update the auto-save useEffect to provide better feedback
   useEffect(() => {
     if (!url || selectedElements.length === 0) return;
 
@@ -75,8 +75,22 @@ export default function HomePage() {
         lastSaved: new Date().toISOString(),
       };
 
-      saveMutation.mutate(workflow);
-    }, 1000); // Debounce for 1 second
+      saveMutation.mutate(workflow, {
+        onSuccess: () => {
+          toast({
+            description: "Changes auto-saved",
+            duration: 2000,
+          });
+        },
+        onError: (error) => {
+          toast({
+            title: "Auto-save failed",
+            description: error.message,
+            variant: "destructive",
+          });
+        },
+      });
+    }, 500); // Reduced debounce time to 500ms for more frequent saves
 
     return () => clearTimeout(timeoutId);
   }, [url, selectedElements]);
