@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth } from "./auth";
-import { insertWorkflowSchema } from "@shared/schema";
+import { insertWorkflowSchema, insertProxySchema, insertProxySettingsSchema, parseProxyString } from "@shared/schema";
 import * as cheerio from "cheerio";
 
 export function registerRoutes(app: Express): Server {
@@ -36,8 +36,51 @@ export function registerRoutes(app: Express): Server {
     res.status(201).json(workflow);
   });
 
+  // Proxy management routes
+  app.post("/api/proxies/bulk", requireAuth, async (req, res) => {
+    try {
+      const { proxies, type } = req.body;
+      if (!Array.isArray(proxies)) {
+        return res.status(400).send("Expected array of proxy strings");
+      }
+
+      const parsedProxies = proxies.map(proxyStr => ({
+        ...parseProxyString(proxyStr),
+        type: type || 'http'
+      }));
+
+      const results = await storage.addProxies(parsedProxies);
+      res.status(201).json(results);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to add proxies" });
+    }
+  });
+
+  app.get("/api/proxies/settings", requireAuth, async (req, res) => {
+    try {
+      const settings = await storage.getProxySettings();
+      res.json(settings);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to get proxy settings" });
+    }
+  });
+
+  app.patch("/api/proxies/settings", requireAuth, async (req, res) => {
+    try {
+      const result = insertProxySettingsSchema.partial().safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json(result.error);
+      }
+
+      const settings = await storage.updateProxySettings(result.data);
+      res.json(settings);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update proxy settings" });
+    }
+  });
+
   app.post("/api/scrape", requireAuth, async (req, res) => {
-    const { url, selectors } = req.body;
+    const { url, selectors, useProxy } = req.body;
     if (!url || !selectors) {
       return res.status(400).send("Missing url or selectors");
     }
@@ -46,14 +89,35 @@ export function registerRoutes(app: Express): Server {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-      const response = await fetch(url, {
+      let proxy: any = undefined;
+      if (useProxy) {
+        proxy = await storage.getAvailableProxy();
+        if (proxy) {
+          await storage.updateProxyStatus(proxy.id, 'in_use');
+        }
+      }
+
+      const startTime = Date.now();
+      const fetchOptions: RequestInit = {
         signal: controller.signal,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
-      });
+      };
 
+      if (proxy) {
+        const proxyUrl = `${proxy.type}://${proxy.username}:${proxy.password}@${proxy.ip}:${proxy.port}`;
+        fetchOptions.agent = new (require('https-proxy-agent'))(proxyUrl);
+      }
+
+      const response = await fetch(url, fetchOptions);
       clearTimeout(timeoutId);
+
+      if (proxy) {
+        const responseTime = Date.now() - startTime;
+        await storage.updateProxyStats(proxy.id, responseTime);
+        await storage.updateProxyStatus(proxy.id, 'cooling_down');
+      }
 
       const html = await response.text();
       const $ = cheerio.load(html);
@@ -67,6 +131,11 @@ export function registerRoutes(app: Express): Server {
 
       res.json({ results });
     } catch (error) {
+      if (proxy) {
+        await storage.updateProxyStats(proxy.id, undefined, true);
+        await storage.updateProxyStatus(proxy.id, 'available');
+      }
+
       if (error instanceof Error) {
         res.status(500).json({ error: error.message });
       } else {
