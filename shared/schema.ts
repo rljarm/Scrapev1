@@ -45,6 +45,15 @@ export const workflows = pgTable("workflows", {
   lastSaved: text("last_saved").notNull(),
 });
 
+export const scrapedFolders = pgTable("scraped_folders", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull(),
+  parentUrl: text("parent_url").notNull(),
+  folderPath: text("folder_path").notNull(),
+  scrapedData: jsonb("scraped_data").notNull(),
+  scrapedAt: timestamp("scraped_at").notNull().defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -67,6 +76,12 @@ export const insertWorkflowSchema = createInsertSchema(workflows).omit({
   userId: true,
 });
 
+export const insertScrapedFolderSchema = createInsertSchema(scrapedFolders).omit({
+  id: true,
+  userId: true,
+  scrapedAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type Workflow = typeof workflows.$inferSelect;
@@ -75,6 +90,8 @@ export type Proxy = typeof proxies.$inferSelect;
 export type InsertProxy = z.infer<typeof insertProxySchema>;
 export type ProxySettings = typeof proxySettings.$inferSelect;
 export type InsertProxySettings = z.infer<typeof insertProxySettingsSchema>;
+export type ScrapedFolder = typeof scrapedFolders.$inferSelect;
+export type InsertScrapedFolder = z.infer<typeof insertScrapedFolderSchema>;
 
 // Helper function to parse proxy strings
 export function parseProxyString(proxyStr: string): InsertProxy {

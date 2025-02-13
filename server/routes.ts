@@ -201,6 +201,43 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
+  app.post("/api/scraped-folders", requireAuth, async (req, res) => {
+    try {
+      const result = insertScrapedFolderSchema.safeParse(req.body);
+      if (!result.success) {
+        return res.status(400).json(result.error);
+      }
+
+      const scrapedFolder = await storage.saveScrapedFolder({
+        ...result.data,
+        userId: req.user!.id,
+      });
+
+      res.status(201).json(scrapedFolder);
+    } catch (error) {
+      console.error('Error saving scraped folder:', error);
+      res.status(500).json({ error: "Failed to save scraped folder data" });
+    }
+  });
+
+  app.get("/api/scraped-folders", requireAuth, async (req, res) => {
+    try {
+      const parentUrl = req.query.parentUrl as string;
+      let folders;
+
+      if (parentUrl) {
+        folders = await storage.getScrapedFoldersByParentUrl(req.user!.id, parentUrl);
+      } else {
+        folders = await storage.getScrapedFoldersByUserId(req.user!.id);
+      }
+
+      res.json(folders);
+    } catch (error) {
+      console.error('Error fetching scraped folders:', error);
+      res.status(500).json({ error: "Failed to fetch scraped folders" });
+    }
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

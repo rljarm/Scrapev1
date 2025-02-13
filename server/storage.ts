@@ -1,4 +1,4 @@
-import { InsertUser, User, Workflow, InsertWorkflow, Proxy, InsertProxy, ProxySettings, InsertProxySettings } from "@shared/schema";
+import { InsertUser, User, Workflow, InsertWorkflow, Proxy, InsertProxy, ProxySettings, InsertProxySettings, ScrapedFolder, InsertScrapedFolder } from "@shared/schema";
 import createMemoryStore from "memorystore";
 import session from "express-session";
 
@@ -20,6 +20,11 @@ export interface IStorage {
   updateProxyStats(id: number, responseTime?: number, failed?: boolean): Promise<void>;
   getProxySettings(): Promise<ProxySettings>;
   updateProxySettings(settings: Partial<InsertProxySettings>): Promise<ProxySettings>;
+
+  // Add new methods for scraped folders
+  saveScrapedFolder(data: InsertScrapedFolder & { userId: number }): Promise<ScrapedFolder>;
+  getScrapedFoldersByUserId(userId: number): Promise<ScrapedFolder[]>;
+  getScrapedFoldersByParentUrl(userId: number, parentUrl: string): Promise<ScrapedFolder[]>;
 }
 
 export class MemStorage implements IStorage {
@@ -27,6 +32,7 @@ export class MemStorage implements IStorage {
   private workflows: Map<number, Workflow>;
   private proxies: Map<number, Proxy>;
   private proxySettings: ProxySettings;
+  private scrapedFolders: Map<number, ScrapedFolder>;
   private currentId: number;
   sessionStore: session.Store;
 
@@ -54,6 +60,7 @@ export class MemStorage implements IStorage {
       maxFailCount: 3,
       enabled: true,
     };
+    this.scrapedFolders = new Map();
   }
 
   async getUser(id: number): Promise<User | undefined> {
@@ -175,6 +182,29 @@ export class MemStorage implements IStorage {
       ...settings,
     };
     return this.proxySettings;
+  }
+
+  async saveScrapedFolder(data: InsertScrapedFolder & { userId: number }): Promise<ScrapedFolder> {
+    const id = this.currentId++;
+    const scrapedFolder: ScrapedFolder = {
+      ...data,
+      id,
+      scrapedAt: new Date(),
+    };
+    this.scrapedFolders.set(id, scrapedFolder);
+    return scrapedFolder;
+  }
+
+  async getScrapedFoldersByUserId(userId: number): Promise<ScrapedFolder[]> {
+    return Array.from(this.scrapedFolders.values()).filter(
+      (folder) => folder.userId === userId
+    );
+  }
+
+  async getScrapedFoldersByParentUrl(userId: number, parentUrl: string): Promise<ScrapedFolder[]> {
+    return Array.from(this.scrapedFolders.values()).filter(
+      (folder) => folder.userId === userId && folder.parentUrl === parentUrl
+    );
   }
 }
 
