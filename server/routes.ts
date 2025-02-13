@@ -16,6 +16,63 @@ export function registerRoutes(app: Express): Server {
     next();
   };
 
+  app.get("/api/proxy", requireAuth, async (req, res) => {
+    const targetUrl = req.query.url as string;
+    if (!targetUrl) {
+      return res.status(400).send("URL parameter is required");
+    }
+
+    try {
+      const response = await fetch(targetUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch URL: ${response.statusText}`);
+      }
+
+      const contentType = response.headers.get('content-type');
+      if (contentType) {
+        res.setHeader('Content-Type', contentType);
+      }
+
+      // Get the HTML content
+      const html = await response.text();
+
+      // Modify the HTML to handle relative URLs
+      const $ = cheerio.load(html);
+
+      // Convert relative URLs to absolute
+      $('link[rel="stylesheet"]').each((_, el) => {
+        const href = $(el).attr('href');
+        if (href && !href.startsWith('http')) {
+          $(el).attr('href', new URL(href, targetUrl).toString());
+        }
+      });
+
+      $('script[src]').each((_, el) => {
+        const src = $(el).attr('src');
+        if (src && !src.startsWith('http')) {
+          $(el).attr('src', new URL(src, targetUrl).toString());
+        }
+      });
+
+      $('img[src]').each((_, el) => {
+        const src = $(el).attr('src');
+        if (src && !src.startsWith('http')) {
+          $(el).attr('src', new URL(src, targetUrl).toString());
+        }
+      });
+
+      res.send($.html());
+    } catch (error) {
+      console.error('Proxy error:', error);
+      res.status(500).send(error instanceof Error ? error.message : 'Failed to fetch URL');
+    }
+  });
+
   app.get("/api/workflows", requireAuth, async (req, res) => {
     const workflows = await storage.getWorkflowsByUserId(req.user!.id);
     res.json(workflows);
