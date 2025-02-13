@@ -7,12 +7,59 @@ import { LogOut } from "lucide-react";
 import IframeViewer from "@/components/scraper/iframe-viewer";
 import SelectorTools from "@/components/scraper/selector-tools";
 import WorkflowEditor from "@/components/scraper/workflow-editor";
+import { useMutation } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { InsertWorkflow } from "@shared/schema";
 
 export default function HomePage() {
   const { user, logoutMutation } = useAuth();
   const { toast } = useToast();
   const [url, setUrl] = useState("");
-  const [selectedElements, setSelectedElements] = useState<{type: "css" | "xpath", value: string, label: string}[]>([]);
+  const [selectedElements, setSelectedElements] = useState<{
+    type: "css" | "xpath";
+    value: string;
+    label: string;
+  }[]>([]);
+
+  const saveMutation = useMutation({
+    mutationFn: async (workflow: InsertWorkflow) => {
+      const res = await apiRequest("POST", "/api/workflows", workflow);
+      return await res.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Workflow saved successfully",
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const scrapeMutation = useMutation({
+    mutationFn: async (data: { url: string; selectors: typeof selectedElements }) => {
+      const res = await apiRequest("POST", "/api/scrape", data);
+      return await res.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Scraping Results",
+        description: `Found ${data.results.length} matches`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Scraping Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
 
   return (
     <div className="min-h-screen bg-background">
@@ -37,18 +84,21 @@ export default function HomePage() {
       <main className="container mx-auto px-4 py-6">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <Card className="lg:col-span-2 p-4">
-            <IframeViewer url={url} onSelectElement={(el) => {
-              setSelectedElements([...selectedElements, el]);
-              toast({
-                title: "Element selected",
-                description: `Added ${el.type} selector: ${el.value}`,
-              });
-            }} />
+            <IframeViewer
+              url={url}
+              onSelectElement={(el) => {
+                setSelectedElements([...selectedElements, el]);
+                toast({
+                  title: "Element selected",
+                  description: `Added ${el.type} selector: ${el.value}`,
+                });
+              }}
+            />
           </Card>
-          
+
           <div className="space-y-6">
-            <SelectorTools 
-              url={url} 
+            <SelectorTools
+              url={url}
               onUrlChange={setUrl}
               selectedElements={selectedElements}
               onRemoveElement={(index) => {
@@ -56,17 +106,20 @@ export default function HomePage() {
                 newElements.splice(index, 1);
                 setSelectedElements(newElements);
               }}
+              onScrape={() => {
+                if (!url || selectedElements.length === 0) return;
+                scrapeMutation.mutate({ url, selectors: selectedElements });
+              }}
+              isLoading={scrapeMutation.isPending}
             />
 
             <WorkflowEditor
               selectedElements={selectedElements}
               url={url}
-              onSave={() => {
-                toast({
-                  title: "Success",
-                  description: "Workflow saved successfully",
-                });
+              onSave={(workflow) => {
+                saveMutation.mutate(workflow);
               }}
+              isLoading={saveMutation.isPending}
             />
           </div>
         </div>

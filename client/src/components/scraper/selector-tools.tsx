@@ -1,16 +1,34 @@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { Globe, X } from "lucide-react";
+import { Globe, X, Play, Loader2 } from "lucide-react";
 
 interface Props {
   url: string;
   onUrlChange: (url: string) => void;
-  selectedElements: Array<{type: "css" | "xpath", value: string, label: string}>;
+  selectedElements: Array<{ type: "css" | "xpath"; value: string; label: string }>;
   onRemoveElement: (index: number) => void;
+  onScrape: () => void;
+  isLoading?: boolean;
 }
 
-export default function SelectorTools({ url, onUrlChange, selectedElements, onRemoveElement }: Props) {
+export default function SelectorTools({
+  url,
+  onUrlChange,
+  selectedElements,
+  onRemoveElement,
+  onScrape,
+  isLoading = false,
+}: Props) {
+  function validateUrl(url: string) {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -23,8 +41,17 @@ export default function SelectorTools({ url, onUrlChange, selectedElements, onRe
             value={url}
             onChange={(e) => onUrlChange(e.target.value)}
           />
-          <Button variant="outline" size="icon">
-            <Globe className="h-4 w-4" />
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={onScrape}
+            disabled={!validateUrl(url) || selectedElements.length === 0 || isLoading}
+          >
+            {isLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="h-4 w-4" />
+            )}
           </Button>
         </div>
 
