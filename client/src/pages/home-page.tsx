@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
@@ -60,6 +60,26 @@ export default function HomePage() {
       });
     },
   });
+
+  // Auto-save whenever the URL or selected elements change
+  useEffect(() => {
+    if (!url || selectedElements.length === 0) return;
+
+    const timeoutId = setTimeout(() => {
+      const workflow: InsertWorkflow = {
+        name: `Scrape ${new URL(url).hostname}`,
+        targetUrl: url,
+        selectors: selectedElements,
+        requiresJavaScript: false,
+        useProxy: false,
+        lastSaved: new Date().toISOString(),
+      };
+
+      saveMutation.mutate(workflow);
+    }, 1000); // Debounce for 1 second
+
+    return () => clearTimeout(timeoutId);
+  }, [url, selectedElements]);
 
   return (
     <div className="min-h-screen bg-background">

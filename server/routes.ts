@@ -31,6 +31,7 @@ export function registerRoutes(app: Express): Server {
     res.status(201).json(workflow);
   });
 
+  // Configure scraping with high resource limits
   app.post("/api/scrape", async (req, res) => {
     if (!req.user) return res.sendStatus(401);
 
@@ -40,7 +41,19 @@ export function registerRoutes(app: Express): Server {
     }
 
     try {
-      const response = await fetch(url);
+      // Configure high timeout for resource-intensive scraping
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      });
+
+      clearTimeout(timeoutId);
+
       const html = await response.text();
       const $ = cheerio.load(html);
 
@@ -50,11 +63,15 @@ export function registerRoutes(app: Express): Server {
         }
         // XPath support would be implemented here
         return null;
-      });
+      }).filter(Boolean); // Remove null results
 
       res.json({ results });
     } catch (error) {
-      res.status(500).json({ error: "Failed to scrape URL" });
+      if (error instanceof Error) {
+        res.status(500).json({ error: error.message });
+      } else {
+        res.status(500).json({ error: "Failed to scrape URL" });
+      }
     }
   });
 
