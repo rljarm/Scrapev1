@@ -10,40 +10,146 @@ interface Props {
 
 export default function IframeViewer({ url, onSelectElement }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const overlayRef = useRef<HTMLCanvasElement>(null);
   const [scale, setScale] = useState(1);
+  const [hoveredElement, setHoveredElement] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
     const iframe = iframeRef.current;
-    if (!iframe || !url) return;
+    const overlay = overlayRef.current;
+    if (!iframe || !overlay || !url) return;
+
+    const ctx = overlay.getContext('2d');
+    if (!ctx) return;
+
+    function updateOverlay(element: HTMLElement | null) {
+      if (!ctx || !overlay) return;
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      if (!element) return;
+
+      const rect = element.getBoundingClientRect();
+      ctx.strokeStyle = '#4f46e5';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(rect.left, rect.top, rect.width, rect.height);
+
+      // Add semi-transparent fill
+      ctx.fillStyle = 'rgba(79, 70, 229, 0.1)';
+      ctx.fillRect(rect.left, rect.top, rect.width, rect.height);
+    }
+
+    function handleMouseMove(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      if (target !== hoveredElement) {
+        setHoveredElement(target);
+        updateOverlay(target);
+      }
+    }
 
     function handleClick(e: MouseEvent) {
       e.preventDefault();
       const target = e.target as HTMLElement;
       const cssSelector = generateSelector(target);
       const xpath = generateXPath(target);
-      
+
       onSelectElement({
         type: "css",
         value: cssSelector,
-        label: target.textContent?.slice(0, 30) || "Selected element"
+        label: target.textContent?.slice(0, 30)?.trim() || "Selected element"
       });
     }
 
+    // Resize overlay to match iframe content
+    function resizeOverlay() {
+      if (!overlay || !iframe.contentDocument) return;
+      const doc = iframe.contentDocument;
+      overlay.width = doc.documentElement.scrollWidth;
+      overlay.height = doc.documentElement.scrollHeight;
+      updateOverlay(hoveredElement);
+    }
+
+    iframe.contentWindow?.document.addEventListener('mousemove', handleMouseMove);
     iframe.contentWindow?.document.addEventListener('click', handleClick);
+    iframe.addEventListener('load', resizeOverlay);
+    window.addEventListener('resize', resizeOverlay);
+
     return () => {
+      iframe.contentWindow?.document.removeEventListener('mousemove', handleMouseMove);
       iframe.contentWindow?.document.removeEventListener('click', handleClick);
+      iframe.removeEventListener('load', resizeOverlay);
+      window.removeEventListener('resize', resizeOverlay);
     };
-  }, [url, onSelectElement]);
+  }, [url, onSelectElement, hoveredElement]);
 
   function generateSelector(element: HTMLElement): string {
-    // Simple implementation - in reality would be more robust
-    return element.id ? `#${element.id}` : element.className ? `.${element.className.split(' ')[0]}` : element.tagName.toLowerCase();
+    const path: string[] = [];
+    let current: HTMLElement | null = element;
+
+    while (current) {
+      // Try ID first
+      if (current.id) {
+        path.unshift(`#${current.id}`);
+        break;
+      }
+
+      // Then try classes
+      if (current.className) {
+        const classes = current.className.split(' ')
+          .filter(c => c && !c.includes('hover') && !c.includes('active'))
+          .join('.');
+        if (classes) {
+          path.unshift(`.${classes}`);
+          continue;
+        }
+      }
+
+      // Fallback to tag with nth-child
+      let index = 1;
+      let sibling = current.previousElementSibling;
+      while (sibling) {
+        if (sibling.tagName === current.tagName) index++;
+        sibling = sibling.previousElementSibling;
+      }
+
+      path.unshift(`${current.tagName.toLowerCase()}:nth-child(${index})`);
+      current = current.parentElement;
+    }
+
+    return path.join(' > ');
   }
 
   function generateXPath(element: HTMLElement): string {
-    // Simple implementation - in reality would be more robust
-    if (element.id) return `//*[@id="${element.id}"]`;
-    return element.tagName.toLowerCase();
+    const parts: string[] = [];
+    let current: HTMLElement | null = element;
+
+    while (current && current.nodeType === Node.ELEMENT_NODE) {
+      let index = 1;
+      let sibling = current.previousElementSibling;
+
+      while (sibling) {
+        if (sibling.nodeName === current.nodeName) index++;
+        sibling = sibling.previousElementSibling;
+      }
+
+      const tagName = current.nodeName.toLowerCase();
+      const predicates: string[] = [];
+
+      if (current.id) {
+        predicates.push(`@id='${current.id}'`);
+      }
+
+      if (index > 1) {
+        predicates.push(`${index}`);
+      }
+
+      const step = predicates.length > 0 
+        ? `${tagName}[${predicates.join(' and ')}]`
+        : tagName;
+
+      parts.unshift(step);
+      current = current.parentElement;
+    }
+
+    return `//${parts.join('/')}`;
   }
 
   return (
@@ -72,19 +178,29 @@ export default function IframeViewer({ url, onSelectElement }: Props) {
         </div>
       </div>
 
-      <div style={{
+      <div className="relative" style={{
         transform: `scale(${scale})`,
         transformOrigin: 'top left',
         width: `${100 / scale}%`,
         height: `${100 / scale}%`
       }}>
         {url && (
-          <iframe
-            ref={iframeRef}
-            src={url}
-            className="w-full h-[600px] border rounded-lg"
-            sandbox="allow-same-origin"
-          />
+          <>
+            <iframe
+              ref={iframeRef}
+              src={url}
+              className="w-full h-[600px] border rounded-lg"
+              sandbox="allow-same-origin allow-scripts"
+            />
+            <canvas
+              ref={overlayRef}
+              className="absolute top-0 left-0 pointer-events-none"
+              style={{
+                width: '100%',
+                height: '100%'
+              }}
+            />
+          </>
         )}
       </div>
     </div>
