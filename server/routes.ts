@@ -16,18 +16,49 @@ export function registerRoutes(app: Express): Server {
     next();
   };
 
-  app.get("/api/proxy", requireAuth, async (req, res) => {
+  // Add proxy requirement for scraping operations
+  const requireProxy = async (req: Express.Request, res: Express.Response, next: Express.NextFunction) => {
+    if (!await storage.hasAvailableProxies()) {
+      return res.status(503).json({
+        message: "No working proxies available. Please configure proxies before scraping."
+      });
+    }
+    next();
+  };
+
+  app.get("/api/proxy", requireAuth, requireProxy, async (req, res) => {
     const targetUrl = req.query.url as string;
     if (!targetUrl) {
       return res.status(400).send("URL parameter is required");
     }
 
     try {
-      const response = await fetch(targetUrl, {
+      const proxy = await storage.getAvailableProxy();
+      const startTime = Date.now();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+      const fetchOptions: RequestInit = {
+        signal: controller.signal,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         }
-      });
+      };
+
+      if (proxy) {
+        await storage.updateProxyStatus(proxy.id, 'in_use');
+        const proxyUrl = `${proxy.type}://${proxy.username}:${proxy.password}@${proxy.ip}:${proxy.port}`;
+        fetchOptions.agent = new (require('https-proxy-agent'))(proxyUrl);
+      }
+
+      const response = await fetch(targetUrl, fetchOptions);
+      clearTimeout(timeoutId);
+
+      if (proxy) {
+        const responseTime = Date.now() - startTime;
+        await storage.updateProxyStats(proxy.id, responseTime);
+        await storage.updateProxyStatus(proxy.id, 'cooling_down');
+      }
 
       if (!response.ok) {
         throw new Error(`Failed to fetch URL: ${response.statusText}`);
@@ -38,31 +69,16 @@ export function registerRoutes(app: Express): Server {
         res.setHeader('Content-Type', contentType);
       }
 
-      // Get the HTML content
       const html = await response.text();
-
-      // Modify the HTML to handle relative URLs
       const $ = cheerio.load(html);
 
       // Convert relative URLs to absolute
-      $('link[rel="stylesheet"]').each((_, el) => {
-        const href = $(el).attr('href');
-        if (href && !href.startsWith('http')) {
-          $(el).attr('href', new URL(href, targetUrl).toString());
-        }
-      });
-
-      $('script[src]').each((_, el) => {
-        const src = $(el).attr('src');
-        if (src && !src.startsWith('http')) {
-          $(el).attr('src', new URL(src, targetUrl).toString());
-        }
-      });
-
-      $('img[src]').each((_, el) => {
-        const src = $(el).attr('src');
-        if (src && !src.startsWith('http')) {
-          $(el).attr('src', new URL(src, targetUrl).toString());
+      $('link[rel="stylesheet"], script[src], img[src]').each((_, el) => {
+        const $el = $(el);
+        const attr = $el.is('img') ? 'src' : ($el.is('script') ? 'src' : 'href');
+        const url = $el.attr(attr);
+        if (url && !url.startsWith('http')) {
+          $el.attr(attr, new URL(url, targetUrl).toString());
         }
       });
 
@@ -136,20 +152,16 @@ export function registerRoutes(app: Express): Server {
     }
   });
 
-  app.post("/api/scrape", requireAuth, async (req, res) => {
-    const { url, selectors, useProxy } = req.body;
+  app.post("/api/scrape", requireAuth, requireProxy, async (req, res) => {
+    const { url, selectors } = req.body;
     if (!url || !selectors) {
       return res.status(400).send("Missing url or selectors");
     }
 
     try {
+      const proxy = await storage.getAvailableProxy();
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-      let proxy = undefined;
-      if (useProxy) {
-        proxy = await storage.getAvailableProxy();
-      }
 
       const startTime = Date.now();
       const fetchOptions: RequestInit = {
