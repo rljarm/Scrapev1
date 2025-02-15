@@ -25,6 +25,8 @@ export interface IStorage {
   saveScrapedFolder(data: InsertScrapedFolder & { userId: number }): Promise<ScrapedFolder>;
   getScrapedFoldersByUserId(userId: number): Promise<ScrapedFolder[]>;
   getScrapedFoldersByParentUrl(userId: number, parentUrl: string): Promise<ScrapedFolder[]>;
+  // Add new method for checking proxy availability
+  hasAvailableProxies(): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -205,6 +207,19 @@ export class MemStorage implements IStorage {
     return Array.from(this.scrapedFolders.values()).filter(
       (folder) => folder.userId === userId && folder.parentUrl === parentUrl
     );
+  }
+
+  async hasAvailableProxies(): Promise<boolean> {
+    const settings = await this.getProxySettings();
+    if (!settings.enabled) return false;
+
+    const availableProxies = Array.from(this.proxies.values()).filter(proxy => {
+      if (proxy.status !== 'available') return false;
+      if (proxy.failCount >= settings.maxFailCount) return false;
+      return true;
+    });
+
+    return availableProxies.length > 0;
   }
 }
 
