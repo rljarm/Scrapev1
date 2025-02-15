@@ -146,12 +146,9 @@ export function registerRoutes(app: Express): Server {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-      let proxy: any = undefined;
+      let proxy = undefined;
       if (useProxy) {
         proxy = await storage.getAvailableProxy();
-        if (proxy) {
-          await storage.updateProxyStatus(proxy.id, 'in_use');
-        }
       }
 
       const startTime = Date.now();
@@ -163,6 +160,7 @@ export function registerRoutes(app: Express): Server {
       };
 
       if (proxy) {
+        await storage.updateProxyStatus(proxy.id, 'in_use');
         const proxyUrl = `${proxy.type}://${proxy.username}:${proxy.password}@${proxy.ip}:${proxy.port}`;
         fetchOptions.agent = new (require('https-proxy-agent'))(proxyUrl);
       }
@@ -193,11 +191,8 @@ export function registerRoutes(app: Express): Server {
         await storage.updateProxyStatus(proxy.id, 'available');
       }
 
-      if (error instanceof Error) {
-        res.status(500).json({ error: error.message });
-      } else {
-        res.status(500).json({ error: "Failed to scrape URL" });
-      }
+      console.error('Scraping error:', error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to scrape URL" });
     }
   });
 

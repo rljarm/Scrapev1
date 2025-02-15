@@ -82,33 +82,9 @@ export function setupAuth(app: Express) {
     }
   });
 
-  // Add middleware to check proxy availability
-  const requireProxies = async (req: Express.Request, res: Express.Response, next: Express.NextFunction) => {
-    if (req.path === '/api/proxies' || req.path === '/api/proxies/settings') {
-      return next(); // Allow proxy management endpoints
-    }
-
-    const hasProxies = await storage.hasAvailableProxies();
-    if (!hasProxies) {
-      return res.status(503).json({ 
-        message: "No working proxies available. Please configure proxies before using the application."
-      });
-    }
-    next();
-  };
-
-  // Add the proxy check middleware after authentication
-  app.use('/api', requireProxies);
 
   app.post("/api/register", async (req, res, next) => {
     try {
-      const hasProxies = await storage.hasAvailableProxies();
-      if (!hasProxies) {
-        return res.status(503).json({ 
-          message: "No working proxies available. Please configure proxies before registering."
-        });
-      }
-
       const existingUser = await storage.getUserByUsername(req.body.username);
       if (existingUser) {
         return res.status(400).send("Username already exists");
@@ -128,28 +104,17 @@ export function setupAuth(app: Express) {
     }
   });
 
-  app.post("/api/login", async (req, res, next) => {
-    try {
-      const hasProxies = await storage.hasAvailableProxies();
-      if (!hasProxies) {
-        return res.status(503).json({ 
-          message: "No working proxies available. Please configure proxies before logging in."
-        });
+  app.post("/api/login", (req, res, next) => {
+    passport.authenticate("local", (err, user, info) => {
+      if (err) return next(err);
+      if (!user) {
+        return res.status(400).send(info?.message || "Invalid credentials");
       }
-
-      passport.authenticate("local", (err, user, info) => {
+      req.login(user, (err) => {
         if (err) return next(err);
-        if (!user) {
-          return res.status(400).send(info?.message || "Invalid credentials");
-        }
-        req.login(user, (err) => {
-          if (err) return next(err);
-          res.status(200).json(user);
-        });
-      })(req, res, next);
-    } catch (error) {
-      next(error);
-    }
+        res.status(200).json(user);
+      });
+    })(req, res, next);
   });
 
   app.post("/api/logout", (req, res, next) => {
